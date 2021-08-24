@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/benbjohnson/litestream"
+	"github.com/benbjohnson/litestream/file"
 	lss3 "github.com/benbjohnson/litestream/s3"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -33,7 +34,8 @@ func run() error {
 
 	// Parse command line flags.
 	dsn := flag.String("dsn", "", "datasource name")
-	bucket := flag.String("bucket", "", "s3 replica bucket")
+	bucket := flag.String("bucket", "", "replica bucket if type is s3, or destination folder if type is file")
+	typ := flag.String("type", "", "replica type, such as: s3, file")
 	flag.Parse()
 	if *dsn == "" {
 		flag.Usage()
@@ -44,7 +46,7 @@ func run() error {
 	}
 
 	// Create a Litestream DB and attached replica to manage background replication.
-	lsdb, err := replicate(ctx, *dsn, *bucket)
+	lsdb, err := replicate(ctx, *dsn, *bucket, *typ)
 	if err != nil {
 		return err
 	}
@@ -139,15 +141,24 @@ func run() error {
 	return nil
 }
 
-func replicate(ctx context.Context, dsn, bucket string) (*litestream.DB, error) {
+func replicate(ctx context.Context, dsn, bucket, typ string) (*litestream.DB, error) {
 	// Create Litestream DB reference for managing replication.
 	lsdb := litestream.NewDB(dsn)
 
-	// Build S3 replica and attach to database.
-	client := lss3.NewReplicaClient()
-	client.Bucket = bucket
+	// Build replica and attach to database.
+	var client litestream.ReplicaClient
+	switch typ {
+	case lss3.ReplicaClientType:
+		cli := lss3.NewReplicaClient()
+		cli.Bucket = bucket
+		client = cli
+	case file.ReplicaClientType:
+		client = file.NewReplicaClient(bucket)
+	default:
+		return nil, fmt.Errorf("not implemented replica type")
+	}
 
-	replica := litestream.NewReplica(lsdb, "s3")
+	replica := litestream.NewReplica(lsdb, typ)
 	replica.Client = client
 
 	lsdb.Replicas = append(lsdb.Replicas, replica)
